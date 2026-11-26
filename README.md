@@ -1,6 +1,6 @@
 # Canceled and late trains to Uppsala
 
-A single-file web page that shows arrivals at Uppsala C that are canceled ("Inställt") or running late, using live data from Trafikverket's Open API.
+A [single-file web page](viewer/) that shows arrivals at Uppsala C that are canceled ("Inställt") or running late, using live data from Trafikverket's Open API.
 
 ## What it shows
 
