@@ -22,8 +22,8 @@ All settings are remembered in your browser.
 
 ## Setup
 
-1. Get a free API key from [Trafikverket's Open API](https://data.trafikverket.se/).
-2. Open `index.html` in a browser, or host it as static files (for example on GitHub Pages). Rename `uppsala-installda.html` to `index.html` so it loads at the root URL.
+1. Get a free API key from [Trafikverket's Open API](https://data.trafikverket.se/): Go to [https://data.trafikverket.se/get-started](https://data.trafikverket.se/get-started), under "Kom igång med API Öppna Data" choose "Registrera ett konto". Then log in to "API Öppna Data". Go back to [https://data.trafikverket.se/get-started](https://data.trafikverket.se/get-started) and choose "Skapa en nyckel". 
+2. Open `index.html` in a browser.
 3. Paste your key into the page and press **Check now**.
 
 You can also pass the key in the address:
