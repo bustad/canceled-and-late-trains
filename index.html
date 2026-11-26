@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canceled and late trains to Uppsala</title>
+<style>
+  :root {
+    --bg: #f3f5f7; --surface: #ffffff; --ink: #14212b; --muted: #5d6b77;
+    --line: #d5dce2; --alert: #b3261e; --alert-bg: #fbe9e7; --accent: #12466b;
+    --late: #8a5300; --late-bg: #fff1d6; --late-line: #d98a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10181f; --surface: #18232c; --ink: #e8eef2; --muted: #93a2ae;
+      --line: #2b3a46; --alert: #ff8a80; --alert-bg: #3a1f1d; --accent: #7cc0ee;
+      --late: #ffc766; --late-bg: #3a2c12; --late-line: #e0a030;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px 16px 48px;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: end;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 6px; padding: 14px; margin-bottom: 20px;
+  }
+  label { display: flex; flex-direction: column; font-size: .85rem; color: var(--muted); gap: 4px; }
+  label.check { color: var(--ink); font-size: 1rem; flex-direction: row; padding-bottom: 8px; }
+  label.check input { width: 1.1rem; height: 1.1rem; margin-right: 6px; vertical-align: -3px; accent-color: var(--accent); }
+  input, select, button {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px;
+  }
+  input#key { width: 280px; max-width: 100%; }
+  button { background: var(--accent); color: var(--bg); border-color: var(--accent); cursor: pointer; font-weight: 600; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #status { color: var(--muted); font-size: .9rem; margin: 0 0 12px; min-height: 1.4em; }
+  #status.error { color: var(--alert); }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  li {
+    display: grid; grid-template-columns: 5.2rem 1fr; gap: 14px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 6px solid var(--alert); border-radius: 6px; padding: 12px 14px;
+  }
+  li.late { border-left-color: var(--late-line); }
+  li.late .time { text-decoration: none; color: var(--ink); }
+  .badge.late { background: var(--late-bg); color: var(--late); }
+  .time { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: line-through; text-decoration-thickness: 2px; color: var(--muted); }
+  .route { font-weight: 600; }
+  .meta { color: var(--muted); font-size: .9rem; }
+  .badge { display: inline-block; background: var(--alert-bg); color: var(--alert); font-weight: 700; font-size: .8rem; padding: 1px 8px; border-radius: 3px; margin-right: 6px; }
+  .empty { display: block; background: var(--surface); border: 1px dashed var(--line); border-radius: 6px; padding: 18px; color: var(--muted); }
+  @media (max-width: 480px) { li { grid-template-columns: 1fr; gap: 2px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Canceled and late trains to Uppsala</h1>
+  <p class="sub">Arrivals at Uppsala C that Trafikverket marks as canceled or expects to be late. Refreshes every minute.</p>
+
+  <div class="controls">
+    <label>API key
+      <input id="key" type="password" autocomplete="off" placeholder="Trafikverket Open API key">
+    </label>
+    <label>Look ahead
+      <select id="hours">
+        <option value="2">2 hours</option>
+        <option value="4" selected>4 hours</option>
+        <option value="8">8 hours</option>
+        <option value="24">24 hours</option>
+      </select>
+    </label>
+    <label>Count as late from
+      <select id="delay">
+        <option value="1">1 min</option>
+        <option value="3">3 min</option>
+        <option value="5" selected>5 min</option>
+        <option value="10">10 min</option>
+        <option value="15">15 min</option>
+      </select>
+    </label>
+    <label>Late measured by
+      <select id="basis">
+        <option value="either" selected>Either</option>
+        <option value="expected">Expected at Uppsala</option>
+        <option value="current">Current delay</option>
+      </select>
+    </label>
+    <label class="check">
+      <span><input id="term" type="checkbox" checked> Only trains that end in Uppsala</span>
+    </label>
+    <label class="check">
+      <span><input id="pend" type="checkbox" checked> Only SL Pendeltåg</span>
+    </label>
+    <button id="go" type="button">Check now</button>
+  </div>
+
+  <p id="status" role="status" aria-live="polite"></p>
+  <ul id="list"></ul>
+</main>
+
+<script>
+const API = "https://api.trafikinfo.trafikverket.se/v2/data.json";
+const STATION = "U"; // Uppsala C
+const $ = id => document.getElementById(id);
+let stationNames = {};
+
+function store(op, k, v) {
+  try { return op === "get" ? localStorage.getItem(k) : localStorage.setItem(k, v); } catch (e) { return null; }
+}
+
+const SETTINGS = ["hours", "delay", "basis", "term", "pend"];
+
+function saveSettings() {
+  const o = {};
+  SETTINGS.forEach(id => { const el = $(id); o[id] = el.type === "checkbox" ? el.checked : el.value; });
+  store("set", "tv-settings", JSON.stringify(o));
+}
+
+function loadSettings() {
+  let o = {};
+  try { o = JSON.parse(store("get", "tv-settings") || "{}") || {}; } catch (e) {}
+  SETTINGS.forEach(id => {
+    if (!(id in o)) return;
+    const el = $(id);
+    if (el.type === "checkbox") el.checked = o[id] === true;
+    else if ([...el.options].some(opt => opt.value === String(o[id]))) el.value = o[id];
+  });
+}
+
+function buildRequest(key, hours) {
+  const from = new Date(Date.now() - 90 * 60000).toISOString();
+  const to = new Date(Date.now() + hours * 3600000).toISOString();
+  return `<REQUEST>
+  <LOGIN authenticationkey="${key}"/>
+  <QUERY objecttype="TrainAnnouncement" schemaversion="1.9" orderby="AdvertisedTimeAtLocation">
+    <FILTER>
+      <AND>
+        <EQ name="ActivityType" value="Ankomst"/>
+        <EQ name="LocationSignature" value="${STATION}"/>
+        <GT name="AdvertisedTimeAtLocation" value="${from}"/>
+        <LT name="AdvertisedTimeAtLocation" value="${to}"/>
+      </AND>
+    </FILTER>
+    <INCLUDE>AdvertisedTrainIdent</INCLUDE>
+    <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
+    <INCLUDE>FromLocation</INCLUDE>
+    <INCLUDE>ToLocation</INCLUDE>
+    <INCLUDE>ProductInformation</INCLUDE>
+    <INCLUDE>Deviation</INCLUDE>
+    <INCLUDE>Canceled</INCLUDE>
+    <INCLUDE>EstimatedTimeAtLocation</INCLUDE>
+    <INCLUDE>TimeAtLocation</INCLUDE>
+    <INCLUDE>ScheduledDepartureDateTime</INCLUDE>
+  </QUERY>
+  <QUERY objecttype="TrainStation" schemaversion="1.4">
+    <INCLUDE>LocationSignature</INCLUDE>
+    <INCLUDE>AdvertisedShortLocationName</INCLUDE>
+  </QUERY>
+</REQUEST>`;
+}
+
+function buildProgressRequest(key, idents, hours) {
+  const from = new Date(Date.now() - 18 * 3600000).toISOString();
+  const to = new Date(Date.now() + hours * 3600000).toISOString();
+  return `<REQUEST>
+  <LOGIN authenticationkey="${key}"/>
+  <QUERY objecttype="TrainAnnouncement" schemaversion="1.9">
+    <FILTER>
+      <AND>
+        <IN name="AdvertisedTrainIdent" value="${idents.join(",")}"/>
+        <EXISTS name="TimeAtLocation" value="true"/>
+        <GT name="AdvertisedTimeAtLocation" value="${from}"/>
+        <LT name="AdvertisedTimeAtLocation" value="${to}"/>
+      </AND>
+    </FILTER>
+    <INCLUDE>AdvertisedTrainIdent</INCLUDE>
+    <INCLUDE>ScheduledDepartureDateTime</INCLUDE>
+    <INCLUDE>LocationSignature</INCLUDE>
+    <INCLUDE>ActivityType</INCLUDE>
+    <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
+    <INCLUDE>TimeAtLocation</INCLUDE>
+  </QUERY>
+</REQUEST>`;
+}
+
+async function post(body) {
+  const res = await fetch(API, { method: "POST", headers: { "Content-Type": "text/xml" }, body });
+  if (!res.ok) throw new Error(`Trafikverket answered ${res.status}. Check that the API key is valid.`);
+  const data = await res.json();
+  const results = data.RESPONSE.RESULT;
+  if (results[0] && results[0].error) throw new Error(results[0].error.MESSAGE || "The API returned an error.");
+  return results;
+}
+
+function place(list) {
+  if (!list || !list.length) return "?";
+  const sorted = [...list].sort((a, b) => (a.Order || 0) - (b.Order || 0));
+  return sorted.map(l => stationNames[l.LocationName] || l.LocationName).join(" / ");
+}
+
+function render(rows) {
+  const ul = $("list");
+  ul.textContent = "";
+  if (!rows.length) {
+    const d = document.createElement("li");
+    d.className = "empty";
+    d.textContent = "No canceled or late arrivals at Uppsala in this window.";
+    ul.append(d);
+    return;
+  }
+  rows.forEach(r => {
+    const li = document.createElement("li");
+    const fmt = d => d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    const canceled = r.Canceled === true;
+    if (!canceled) li.className = "late";
+    const product = (r.ProductInformation || []).map(p => p.Description).join(", ");
+    const dev = (r.Deviation || []).map(d => d.Description).filter(Boolean).join("; ");
+    const timeEl = document.createElement("div"); timeEl.className = "time";
+    timeEl.textContent = fmt(canceled ? new Date(r.AdvertisedTimeAtLocation) : r._eff);
+    const body = document.createElement("div");
+    const route = document.createElement("div"); route.className = "route";
+    route.textContent = `${place(r.FromLocation)} → ${place(r.ToLocation)}`;
+    const meta = document.createElement("div"); meta.className = "meta";
+    const badge = document.createElement("span");
+    badge.className = canceled ? "badge" : "badge late";
+    badge.textContent = canceled ? "Inställt" : `${r._delay > 0 ? "+" : ""}${r._delay} min`;
+    const cur = (!canceled && r._cur !== undefined)
+      ? `now ${r._cur > 0 ? "+" : ""}${r._cur} min (${r._curAct} ${r._curAt}) · ` : "";
+    const sched = canceled ? "" : `expected at Uppsala, scheduled ${fmt(new Date(r.AdvertisedTimeAtLocation))} · ${cur}`;
+    meta.append(badge, `${sched}${product ? product + " " : ""}${r.AdvertisedTrainIdent}${dev ? " – " + dev : ""}`);
+    body.append(route, meta);
+    li.append(timeEl, body);
+    ul.append(li);
+  });
+}
+
+async function check() {
+  const key = $("key").value.trim();
+  const hours = Number($("hours").value);
+  const status = $("status");
+  status.className = "";
+  if (!key) { status.textContent = "Enter your Trafikverket API key to start."; status.className = "error"; return; }
+  store("set", "tv-key", key);
+  saveSettings();
+  status.textContent = "Checking…";
+  try {
+    const results = await post(buildRequest(key, hours));
+    (results[1]?.TrainStation || []).forEach(s => { stationNames[s.LocationSignature] = s.AdvertisedShortLocationName; });
+    const onlyEnding = $("term").checked;
+    const onlyPendel = $("pend").checked;
+    const minDelay = Number($("delay").value);
+    const basis = $("basis").value;
+    const now = Date.now();
+
+    // Expected delay at Uppsala, plus the usual filters
+    const cands = (results[0].TrainAnnouncement || []).map(r => {
+      const adv = new Date(r.AdvertisedTimeAtLocation);
+      const actual = r.TimeAtLocation || r.EstimatedTimeAtLocation;
+      r._delay = actual ? Math.round((new Date(actual) - adv) / 60000) : 0;
+      r._eff = actual ? new Date(actual) : adv;
+      return r;
+    }).filter(r =>
+      r._eff.getTime() >= now - 10 * 60000 &&
+      r._eff.getTime() <= now + hours * 3600000 &&
+      (!onlyEnding || (r.ToLocation || []).some(l => l.LocationName === STATION)) &&
+      (!onlyPendel || (r.ProductInformation || []).some(p => /pendel/i.test(p.Description || "")))
+    );
+
+    // Current delay: the latest reported time at any station along the way
+    const live = cands.filter(r => r.Canceled !== true);
+    if (live.length) {
+      try {
+        const idents = [...new Set(live.map(r => r.AdvertisedTrainIdent))];
+        const prog = (await post(buildProgressRequest(key, idents, hours)))[0].TrainAnnouncement || [];
+        const latest = {};
+        prog.forEach(p => {
+          const k = p.AdvertisedTrainIdent + "|" + p.ScheduledDepartureDateTime;
+          if (!latest[k] || new Date(p.TimeAtLocation) > new Date(latest[k].TimeAtLocation)) latest[k] = p;
+        });
+        live.forEach(r => {
+          const p = latest[r.AdvertisedTrainIdent + "|" + r.ScheduledDepartureDateTime];
+          if (!p) return;
+          r._cur = Math.round((new Date(p.TimeAtLocation) - new Date(p.AdvertisedTimeAtLocation)) / 60000);
+          r._curAt = stationNames[p.LocationSignature] || p.LocationSignature;
+          r._curAct = p.ActivityType === "Ankomst" ? "arrived" : "departed";
+        });
+      } catch (e) { /* current delay is optional; fall back to expected only */ }
+    }
+
+    const isLate = r => {
+      const exp = r._delay >= minDelay;
+      const cur = r._cur !== undefined && r._cur >= minDelay;
+      return basis === "expected" ? exp : basis === "current" ? cur : (exp || cur);
+    };
+    const rows = cands.filter(r => r.Canceled === true || isLate(r));
+    const nCanceled = rows.filter(r => r.Canceled === true).length;
+    render(rows);
+    status.textContent = `${nCanceled} canceled, ${rows.length - nCanceled} late${onlyEnding ? " (ending in Uppsala)" : ""}${onlyPendel ? " (Pendeltåg)" : ""} · updated ${new Date().toLocaleTimeString("sv-SE")}`;
+  } catch (e) {
+    status.textContent = e.message || "Request failed. If this was blocked, the browser may be restricting cross-site requests.";
+    status.className = "error";
+  }
+}
+
+// Accept the key as ?key=... or #key=... and remove it from the address bar afterwards
+function keyFromUrl() {
+  const q = new URLSearchParams(location.search);
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const k = q.get("key") || h.get("key");
+  if (k) {
+    q.delete("key"); h.delete("key");
+    const qs = q.toString(), hs = h.toString();
+    try { history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "") + (hs ? "#" + hs : "")); } catch (e) {}
+  }
+  return k ? k.trim() : "";
+}
+
+$("key").value = keyFromUrl() || store("get", "tv-key") || "";
+loadSettings();
+$("go").addEventListener("click", check);
+$("hours").addEventListener("change", check);
+$("delay").addEventListener("change", () => { if ($("key").value) check(); });
+$("basis").addEventListener("change", () => { if ($("key").value) check(); });
+$("pend").addEventListener("change", () => { if ($("key").value) check(); });
+$("term").addEventListener("change", () => { if ($("key").value) check(); });
+if ($("key").value) check();
+setInterval(() => { if ($("key").value) check(); }, 60000);
+</script>
+</body>
+</html>
